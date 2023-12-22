@@ -1,6 +1,8 @@
-'Registry time decoder by Alex Dragokas ver.2.0
+'Registry time decoder by Alex Dragokas ver.2.1
 
 const QT = """"
+
+Dim UnixTime, UTCTime
 
 Set oFSO   = CreateObject("Scripting.FileSystemObject")
 Set oShell = CreateObject("WScript.Shell")
@@ -144,6 +146,23 @@ sub Decode4byte()
 	WScript.Echo (DateAdd("s", UnixTime, #1/1/1970#))
 end sub
 
+function IsHexNumber(str)
+	if strcomp(left(str, 2), "0x", 1) = 0 then
+		IsHexNumber = true
+	else
+		dim i, codeA, codeF, code
+		codeA = asc("A")
+		codeF = asc("F")
+		for i = 1 to len(str)
+			code = asc(ucase(mid(str, i, 1)))
+			if code >= codeA and code <= codeF then
+				IsHexNumber = true
+				exit for
+			end if
+		next
+	end if
+end function
+
 'FILETIME
 sub Decode8byte()
     'typedef struct _FILETIME {
@@ -170,6 +189,17 @@ sub Decode8byte()
 		dateTime.SetFileTime HexToDec(UTCTime), false
 		If Err.Number <> 0 then
 			WScript.Echo ("Неудача!")
+			if not IsHexNumber(UTCTime) then
+				Err.Clear
+				WScript.Echo ("Проверяю число как 10-ричное:")
+				UnixTime = Clng(UTCTime)
+				WScript.Echo ("==> " & Cstr(UnixTime))
+				WScript.Echo ""
+				Decode4byte
+				If Err.Number <> 0 then
+					WScript.Echo ("Неудача!")
+				end if
+			end if
 		else
 			WScript.Echo (vbcrlf & dateTime.GetVarDate)
 		end if
