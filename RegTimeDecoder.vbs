@@ -1,4 +1,4 @@
-'Registry time decoder by Alex Dragokas ver.2.1
+'Registry time decoder by Alex Dragokas ver.2.2
 
 const QT = """"
 
@@ -61,7 +61,7 @@ do
     sKey = WScript.StdIn.ReadLine()
   end if
 
-  sKey = Trim(sKey)
+  sKey = NormalizeRegPath(Trim(sKey))
 
   WScript.Echo("")
 
@@ -285,6 +285,16 @@ function ReverseBytesLine(byval sLine) '00808ca3c594c601 => 01c694c5a38c8000
 		strRet = strRet & mid(sLine, i, 2)
 	next
 	ReverseBytesLine = strRet
+end function
+
+function NormalizeRegPath(path)
+	if StrComp(Left(path, 2), "HK", 1) = 0 then
+		NormalizeRegPath = path
+	else
+		Dim pos
+		pos = instr(1, path, "HK", 1)
+		if pos <> 0 then NormalizeRegPath = Mid(path, pos)
+	end if
 end function
 
 'Examples:
