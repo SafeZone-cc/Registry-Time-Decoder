@@ -1,8 +1,8 @@
-'Registry time decoder by Alex Dragokas ver.2.2
+'Registry time decoder by Alex Dragokas ver.2.3
 
 const QT = """"
 
-Dim UnixTime, UTCTime
+Dim UnixTime, UTCTime, bRestart, sKeyArg
 
 Set oFSO   = CreateObject("Scripting.FileSystemObject")
 Set oShell = CreateObject("WScript.Shell")
@@ -27,7 +27,8 @@ WScript.Echo ("--------------------------------------------")
 WScript.Echo ("   Registry time decoder by Alex Dragokas   ")
 WScript.Echo ("--------------------------------------------" & vbcrlf)
 
-WScript.Echo("Введите путь к параметру реестра в формате Улей\Ключ\Параметр," & vbcrlf & "набор байт с запятой или без, либо 16-ричное значение с префиксом 0x:")
+WScript.Echo("Введите путь к параметру реестра в формате Улей\Ключ\Параметр," & vbcrlf & "набор байт с запятой или без, либо 16-ричное значение с префиксом 0x")
+WScript.Echo("Для завершения скрипта нажмите Ctrl + C.")
 WScript.Echo("")
 WScript.Echo("Примеры:")
 WScript.Echo("")
@@ -44,102 +45,133 @@ WScript.Echo("e0,07,04,00,03,00,14,00,06,00,2b,00,3a,00,33,01 - [Binary Hex]")
 
 if WScript.Arguments.Count <> 0 then sKeyArg = UnQuote(WScript.Arguments(0))
 
-do
+bRestart = true
 
-  b16byte = false
-  b8byte = false
-  b4byte = false
-  bRegBased = false
-  bHexValue = false
-
-  if sKeyArg <> "" then ' если преобразование запрошено через аргумент запуска скрипта
-    sKey = sKeyArg
-    sKeyArg = ""
-	WScript.Echo vbcrlf & ">>> " & sKey
-  else
-    WScript.StdOut.Write vbcrlf & ">>> "
-    sKey = WScript.StdIn.ReadLine()
-  end if
-
-  sKey = NormalizeRegPath(Trim(sKey))
-
-  WScript.Echo("")
-
-  if instr(sKey, "\") = 0 then 'value based
-    sKey = replace(sKey, ",", "")
-    sKey = replace(sKey, " ", "")
-
-	if StrComp(Left(sKey,2),"0x",1) = 0 then 'just 16h number (not a byte data)
-		bHexValue = true
-		sKey = mid(sKey, 3)
-	end if
-
-	if Len(sKey) = 0 then WScript.Quit
-
-	if Len(sKey) > 32 or not IsHex(sKey) then
-		WScript.Echo ("Неверный формат входящих данных! Требуется HEX-значение в виде числа или бинарной строки.")
-	elseif len(sKey) > 8 and len(sKey) <= 16 then '8 bytes values (FILETIME)
-        b8byte = true
-		if bHexValue then
-			UTCTime = sKey
-		else
-			UTCTime = ReverseBytesLine(sKey)
-		end if
-	elseif len(sKey) <= 8 then '4 bytes value (Unix-time)
-		b4byte = true
-		UnixTime =  CLng("&H" & sKey)
-    else '16 byte values (SYSTEMTIME)
-		b16byte = true
-		redim Bytes(15)
-		For i = 1 to 31 step 2
-			if Len(sKey) >= i then
-				Bytes((i+1)\2-1) = CLng("&H" & mid(sKey,i,2))
-			end if
-		Next
-	end if
-  else 'registry based
-    bRegBased = true
-    set oShell = CreateObject("WScript.Shell")
-    On Error resume next
-    Bytes = oShell.RegRead(sKey)
-    If Err.Number <> 0 then
-		if msgbox ("Указанного параметра нет, неверный формат параметра, либо нужно запустить этот скрипт от имени администратора!" & vbcrlf & "Запустить от имени админа сейчас?", vbYesNo or vbExclamation, "Ошибка") = vbYes then
-			Set oShellApp = CreateObject("Shell.Application")
-			oShellApp.ShellExecute cHost32, "//nologo " & QT & WScript.ScriptFullName & QT & " " & QT & sKey & QT, "", "runas", 1
-		end if
-	end if
-	On Error Goto 0
-	if isArray(Bytes) then
-		if UBound(Bytes) = 7 then '8-byte value
-			b8byte = true
-			UTCTime = ""
-			for i = 7 to 0 step -1
-				UTCTime = UTCTime & right("0" & Hex(Bytes(i)),2)
-			next
-		elseif UBound(Bytes) = 15 then '16-byte value
-			b16byte = true
-		else
-			WScript.Echo("Неподдерживаемый тип параметра.")
-		end if
-	else
-		if isNumeric(Bytes) then '4-byte value
-			b4byte = true
-			UnixTime = Bytes
-		else
-			WScript.Echo("Неподдерживаемый тип параметра.")
-		end if
-	end if
-  end if
-
-  if b4byte then call Decode4byte()
-  if b8byte then call Decode8byte()
-  if b16byte then call Decode16byte()
-
+do while bRestart
+	Call Main
 loop
 
+Sub Main()
+
+	do
+
+	  b16byte = false
+	  b8byte = false
+	  b4byte = false
+	  bRegBased = false
+	  bHexValue = false
+	  bRestart = false
+	  bHasComma = false
+
+	  if sKeyArg <> "" then ' если преобразование запрошено через аргумент запуска скрипта
+		sKey = sKeyArg
+		sKeyArg = ""
+		WScript.Echo vbcrlf & ">>> " & sKey
+	  else
+		WScript.StdOut.Write vbcrlf & ">>> "
+		sKey = WScript.StdIn.ReadLine()
+	  end if
+
+	  sKey = NormalizeRegPath(Trim(sKey))
+
+	  WScript.Echo("")
+
+	  if instr(sKey, "\") = 0 then 'value based
+		if instr(1, sKey, ",") then bHasComma = true
+		sKey = replace(sKey, ",", "")
+		sKey = replace(sKey, " ", "")
+
+		if StrComp(Left(sKey,2),"0x",1) = 0 then 'just 16h number (not a byte data)
+			bHexValue = true
+			sKey = mid(sKey, 3)
+		end if
+
+		if Len(sKey) = 0 then 
+			WScript.Echo ("Введён пустой или некорректный параметр!")
+			bRestart = true
+			exit do
+		end if
+
+		if Len(sKey) > 32 or not IsHex(sKey) then
+			WScript.Echo ("Неверный формат входящих данных! Требуется HEX-значение в виде числа или бинарной строки.")
+		elseif len(sKey) > 8 and len(sKey) <= 16 then '8 bytes values (FILETIME)
+			b8byte = true
+			if bHexValue then
+				UTCTime = sKey
+			else
+				UTCTime = ReverseBytesLine(sKey)
+			end if
+		elseif len(sKey) <= 8 then '4 bytes value (Unix-time)
+			b4byte = true
+			UnixTime =  CLng("&H" & sKey)
+		else '16 byte values (SYSTEMTIME)
+			b16byte = true
+			redim Bytes(15)
+			For i = 1 to 31 step 2
+				if Len(sKey) >= i then
+					Bytes((i+1)\2-1) = CLng("&H" & mid(sKey,i,2))
+				end if
+			Next
+		end if
+	  else 'registry based
+		bRegBased = true
+		set oShell = CreateObject("WScript.Shell")
+		On Error resume next
+		Bytes = oShell.RegRead(sKey)
+		If Err.Number <> 0 then
+			if Not IsElevated() then
+				if msgbox ("Указанного параметра нет, неверный формат параметра, либо нужно запустить этот скрипт от имени администратора!" & vbcrlf & "Запустить от имени админа сейчас?", vbYesNo or vbExclamation, "Ошибка") = vbYes then
+					Set oShellApp = CreateObject("Shell.Application")
+					oShellApp.ShellExecute cHost32, "//nologo " & QT & WScript.ScriptFullName & QT & " " & QT & sKey & QT, "", "runas", 1
+					WScript.Quit
+				end if
+			else
+				WScript.Echo "Указанный параметр отсутствует в реестре или не удалось получить доступ!"
+				bRestart = true
+				exit do
+			end if
+		end if
+		On Error Goto 0
+		if isArray(Bytes) then
+			if UBound(Bytes) = 7 then '8-byte value
+				b8byte = true
+				UTCTime = ""
+				for i = 7 to 0 step -1
+					UTCTime = UTCTime & right("0" & Hex(Bytes(i)),2)
+				next
+			elseif UBound(Bytes) = 15 then '16-byte value
+				b16byte = true
+			else
+				WScript.Echo("Неподдерживаемый тип параметра.")
+			end if
+		else
+			if isNumeric(Bytes) then '4-byte value
+				b4byte = true
+				UnixTime = Bytes
+			else
+				WScript.Echo("Неподдерживаемый тип параметра.")
+			end if
+		end if
+	  end if
+
+	  if b4byte then call Decode4byte(UnixTime)
+	  if b8byte then 
+		call Decode8byte(UTCTime)
+	    if (not bHexValue) and (not bHasComma) then
+			' try also hexed value
+			sKeyArg = "0x" & sKey
+			bRestart = true
+			exit do
+		end if
+	  end if
+	  if b16byte then call Decode16byte(Bytes)
+
+	loop
+	
+End Sub
 
 'Unix-Time
-sub Decode4byte()
+sub Decode4byte(UnixTime)
 	if bRegBased then
 		WScript.Echo "REG = " & UnixTime & vbcrlf
 	end if
@@ -164,7 +196,7 @@ function IsHexNumber(str)
 end function
 
 'FILETIME
-sub Decode8byte()
+sub Decode8byte(UTCTime)
     'typedef struct _FILETIME {
     '  DWORD dwLowDateTime;
     '  DWORD dwHighDateTime;
@@ -209,7 +241,7 @@ sub Decode8byte()
 end sub
 
 'SYSTEMTIME
-sub Decode16byte()
+sub Decode16byte(Bytes)
 	'typedef struct _SYSTEMTIME {
 	'  WORD wYear;
 	'  WORD wMonth;
@@ -265,6 +297,7 @@ Function HexToDec(strHex)
     Next
 	ret = CStr(ret)
 	ret = replace(ret,",","")
+	ret = replace(ret,".","")
 	pos = instr(1,ret,"e+",1)
 	e = mid(ret,pos+2)
 	ret = left(ret, pos -1)
@@ -293,12 +326,27 @@ function NormalizeRegPath(path)
 	else
 		Dim pos
 		pos = instr(1, path, "HK", 1)
-		if pos <> 0 then NormalizeRegPath = Mid(path, pos)
+		if pos <> 0 then 
+			NormalizeRegPath = Mid(path, pos)
+		else
+			NormalizeRegPath = path
+		end if
 	end if
 end function
 
+Function IsElevated()
+    On Error Resume Next
+    CreateObject("WScript.Shell").RegRead("HKEY_USERS\S-1-5-19\")
+    if Err.Number = 0 Then 
+        IsElevated = True
+    else
+        IsElevated = False
+    end if
+End Function
+
 'Examples:
 'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\InstallDate (Unix-Time)
+'Computer\HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\InstallDate (Unix-Time)
 'HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\Class \...\ => DriverDateData (FILETIME)
 'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles \...\ => DateCreated (SYSTEMTIME)
 
